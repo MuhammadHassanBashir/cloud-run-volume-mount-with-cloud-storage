@@ -1,86 +1,120 @@
 # cloud-run-volume-mount-with-cloud-storage
 
-## Cloud Run Volume Mount with Cloud Storage - Complete Guide
+link: https://cloud.google.com/run/docs/configuring/services/cloud-storage-volume-mounts#gcloud
 
-This guide covers:
+To build a basic Python application that writes to a file in a Cloud Storage bucket mounted as a volume in Cloud Run, you can follow the steps below. Here’s how to set up the Python application, create a Docker container, and deploy it to Cloud Run.
 
-Requirements and Setup
-Creating a Cloud Storage Volume Mount
-Writing and Reading Files in the Mounted Volume
-Verifying File Creation in Cloud Storage
+1. Python Application Structure
+Create a project directory with the following structure:
 
-1. Requirements and Setup
 
-    To mount a Cloud Storage bucket as a volume in Cloud Run, ensure the following:
-    
-    Cloud Run service with the Second Generation execution environment (automatically used if not explicitly configured).
-    
-    Permissions: The Cloud Run service account must have access to the Cloud Storage bucket. The Storage Admin role can be applied to the service account, allowing read/write access to the bucket.
-    Google Cloud CLI (gcloud): This is used to configure and deploy services.
+    cloud_run_volume_app/
+    ├── app.py         # Main application code
+    ├── Dockerfile     # Dockerfile to containerize the app
+    ├── requirements.txt  # Dependency file
 
-2. Creating a Cloud Storage Volume Mount in Cloud Run
+2. Code Implementation
 
-    You can use the Cloud Console or gcloud commands to mount a Cloud Storage bucket as a volume.
-    
-    Using the gcloud CLI:
-    
-    gcloud run services update SERVICE_NAME \
-        --add-volume name=VOLUME_NAME,type=cloud-storage,bucket=BUCKET_NAME \
-        --add-volume-mount volume=VOLUME_NAME,mount-path=/mnt/my-volume
-    Replace SERVICE_NAME with your Cloud Run service name.
-    Replace VOLUME_NAME with a name for the volume.
-    Replace BUCKET_NAME with the name of your Cloud Storage bucket.
-    Replace /mnt/my-volume with the path where you want to mount the volume in your container.
-    Note: If you have multiple containers, add volume mounts for each container as needed.
-    
-    To make the volume read-only (if you don't intend to write to it):
-    
-    gcloud run services update SERVICE_NAME \
-        --add-volume name=VOLUME_NAME,type=cloud-storage,bucket=BUCKET_NAME,readonly=true \
-        --add-volume-mount volume=VOLUME_NAME,mount-path=/mnt/my-volume
+app.py
+This is the main application code that will write to the Cloud Storage volume.
 
-3. Writing and Reading Files in the Mounted Volume
+        
+        import os
+        from flask import Flask
+        
+        app = Flask(__name__)
+        
+        # Define the mount path (should match the mount path used in `gcloud` command)
+        mount_path = "/mnt/my-volume"
+        
+        # Ensure the directory exists
+        if not os.path.exists(mount_path):
+            os.makedirs(mount_path)
+        
+        # Define the file path
+        file_path = os.path.join(mount_path, "example-log.txt")
+        
+        @app.route("/")
+        def write_file():
+            try:
+                with open(file_path, "w") as f:
+                    f.write("Hello, Cloud Storage! This is a test file stored via Cloud Run volume.\n")
+                return f"File successfully written to {file_path}\n", 200
+            except Exception as e:
+                return f"Failed to write to the file: {str(e)}\n", 500
+        
+        if __name__ == "__main__":
+            app.run(host="0.0.0.0", port=8080)
 
-    Now that you have mounted the Cloud Storage volume, you can write and read files from the specified path in your code.
-    
-    Example Python code to create and write data to a file in the mounted volume:
-    
-    python
-    Copy code
-    import os
-    
-    # Define the mount path, this should match the mount path used in gcloud command
-    mount_path = "/mnt/my-volume"
-    
-    # Ensure the directory exists in case it needs to create it within the container
-    if not os.path.exists(mount_path):
-        os.makedirs(mount_path)
-    
-    # Path to the file you want to create
-    file_path = os.path.join(mount_path, "example-log.txt")
-    
-    try:
-        # Open the file in write mode and add some content
-        with open(file_path, "w") as f:
-            f.write("Hello, Cloud Storage! This is a test file stored via Cloud Run volume.\n")
-        print(f"File successfully written to {file_path}")
-    except Exception as e:
-        print(f"Failed to write to the file: {str(e)}")
-    To deploy this code to Cloud Run, include it in your service code and run:
-    
-    bash
-    Copy code
-    gcloud run deploy SERVICE_NAME --source .
+This application uses Flask to create an HTTP server with a single endpoint (/) that writes to example-log.txt in the mounted Cloud Storage volume.
 
-4. Verifying File Creation in Cloud Storage
+requirements.txt
 
-    After the service has successfully run, the created file should be visible in your Cloud Storage bucket. Use the following gsutil command to check:
+        Include Flask as a dependency:
+        
+        Flask
+
+3. Dockerize the Application
+        Create a Dockerfile to containerize the application.
+        
+        Dockerfile
+        Dockerfile
+        Copy code
+        # Use the official Python image.
+        FROM python:3.9-slim
+        
+        # Set environment variables for Flask
+        ENV PYTHONUNBUFFERED True
+        ENV PORT 8080
+        
+        # Install dependencies
+        COPY requirements.txt .
+        RUN pip install -r requirements.txt
+        
+        # Copy local code to the container image
+        COPY . /app
+        WORKDIR /app
+        
+        # Run the web server
+        CMD ["python", "app.py"]
+
+4. Build and Deploy Steps
+
+    Step 1: Build the Docker Image
+    In the terminal, navigate to the cloud_run_volume_app directory and build the Docker image:
     
-    gsutil ls gs://BUCKET_NAME/example-log.txt
-    Replace BUCKET_NAME with the actual bucket name you used in the setup. If the file example-log.txt is in the bucket, your setup is complete and working.
+    docker build -t gcr.io/world-learning-400909/cloud-run-volume-app .
+    Replace YOUR_PROJECT_ID with your actual Google Cloud Project ID.
     
-    Additional Tips
-    Multiple Buckets: You can mount multiple Cloud Storage buckets by adding more volume mounts, each with unique paths.
-    Container Permissions: Ensure the Cloud Run service account has Storage Object Creator or higher permissions for writing and Storage Object Viewer for reading, depending on access needs.
-    Testing Changes: If updating volume mounts or paths, always redeploy the service and verify Cloud Run has the correct configurations.
-    This completes the setup for persisting data between your Cloud Run container and Cloud Storage using volume mounts.
+    Step 2: Push the Docker Image to Artifact Registry
+    First, ensure Artifact Registry is enabled in your Google Cloud project and that you’re authenticated to push images.
+
+    gcloud auth configure-docker
+    docker push gcr.io/world-learning-400909/cloud-run-volume-app
+
+Step 3: Deploy to Cloud Run with Volume Mount
+    
+    Use the gcloud command to deploy the container to Cloud Run, specifying the volume mount:
+    
+    gcloud run deploy cloud-run-volume-app \
+    --image gcr.io/world-learning-400909/cloud-run-volume-app \
+    --region us-central1 \
+    --allow-unauthenticated \
+    --add-volume name=volume1,type=cloud-storage,bucket=testbucket12131 \
+    --add-volume-mount volume=volume1,mount-path=/mnt/my-volume
+
+        
+    YOUR_PROJECT_ID with your Google Cloud Project ID.
+    YOUR_BUCKET_NAME with the name of your Cloud Storage bucket.
+
+5. Test the Application
+    
+    Once deployed, go to the Cloud Run service URL provided by Google Cloud and navigate to the root endpoint (e.g., https://your-cloud-run-service-url/). If successful, the application will write "Hello, Cloud Storage!" to the example-log.txt file in the mounted Cloud Storage volume.
+
+6. Verify the File in Cloud Storage
+
+    To check if the file was created, use the following gsutil command:
+
+    gsutil ls gs://YOUR_BUCKET_NAME/example-log.txt
+   
+    If the file appears in your bucket, the Cloud Run volume mount setup is working correctly.
